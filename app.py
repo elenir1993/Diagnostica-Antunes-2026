@@ -6,7 +6,7 @@ import google.generativeai as genai
 
 # --- CONFIGURAÇÃO DA IA ---
 # Substitua pela sua chave real ou use st.secrets para segurança
-API_KEY = "gen-lang-client-0643311526" 
+API_KEY = "AIzaSyDF02J9XZFSDIOrOOz1E6BhKC4oFBg7amY" 
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-pro')
 
