@@ -8,7 +8,7 @@ import google.generativeai as genai
 # Substitua pela sua chave real ou use st.secrets para segurança
 API_KEY = "AIzaSyDF02J9XZFSDIOrOOz1E6BhKC4oFBg7amY" 
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 st.set_page_config(page_title="Escola José Carlos Antunes", layout="wide")
 
