@@ -1,117 +1,115 @@
 import streamlit as st
 import pandas as pd
-from docx import Document
 import io
-import re
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="NAMI - Plataforma Educacional", layout="wide")
+st.set_page_config(page_title="Escola José Carlos Antunes - Sistema Diagnóstico", layout="wide")
 
-# --- ESTILO CUSTOMIZADO (OPCIONAL) ---
-st.markdown("""
-    <style>
-    .main { background-color: #f5f7f9; }
-    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #4CAF50; color: white; }
-    </style>
-    """, unsafe_allow_html=True)
+# Inicialização de estados
+if 'prova_gerada' not in st.session_state:
+    st.session_state.prova_gerada = []
+if 'respostas_alunos' not in st.session_state:
+    st.session_state.respostas_alunos = []
 
-# --- FUNÇÕES DE APOIO ---
-def gerar_questoes_ia(habilidade, disciplina, num_questoes):
-    # Aqui entrará a chamada da API (OpenAI/Gemini)
-    # Por enquanto, simulamos o retorno da IA
-    simulacao_ia = []
-    for i in range(1, num_questoes + 1):
-        simulacao_ia.append({
-            "id": i,
-            "enunciado": f"Questão sobre {habilidade}: Qual o conceito fundamental de {disciplina} aplicado aqui?",
-            "alternativas": ["A) Opção 1", "B) Opção 2", "C) Opção 3", "D) Opção 4", "E) Opção 5"],
-            "correta": "A"
-        })
-    return simulacao_ia
+# --- IDENTIDADE VISUAL ---
+st.title("🏫 Escola José Carlos Antunes")
+st.subheader("Sistema de Avaliação Diagnóstica Automática")
+st.caption("Desenvolvido por: Elenir")
 
 # --- NAVEGAÇÃO ---
-menu = ["🏠 Início", "📝 Gerar Prova (Professor)", "✍️ Responder Prova (Aluno)", "📊 Tabulação Oficial"]
-escolha = st.sidebar.selectbox("Navegação", menu)
+aba1, aba2, aba3 = st.tabs(["📝 Área do Professor", "✍️ Portal do Aluno", "📊 Relatório e Tabulação"])
 
-# --- PÁGINA INICIAL ---
-if escolha == "🏠 Início":
-    st.title("🚀 Bem-vindo à NAMI")
-    st.subheader("Inteligência e Automação para Professores")
-    st.write("Escolha uma opção no menu lateral para começar.")
-
-# --- MÓDULO DO PROFESSOR: GERAR PROVA ---
-elif escolha == "📝 Gerar Prova (Professor)":
-    st.title("Gerador de Provas Inteligente")
+# --- ABA 1: PROFESSOR ---
+with aba1:
+    st.header("Configuração da Prova")
     
-    with st.form("form_geracao"):
+    with st.expander("💡 Instruções para Habilidades", expanded=True):
+        st.info("Você pode digitar várias habilidades separadas por vírgula (ex: EF09MA01, EF09MA02). A IA distribuirá as questões entre elas.")
+
+    with st.form("config_prova"):
         col1, col2 = st.columns(2)
         with col1:
-            prof = st.text_input("Nome do Professor")
-            disciplina = st.text_input("Disciplina")
+            nome_prof = st.text_input("Nome do Professor(a)")
+            materia = st.text_input("Disciplina")
         with col2:
-            habilidade = st.text_input("Habilidade BNCC (ex: EF09MA01)")
-            num_q = st.slider("Quantidade de Questões", 1, 20, 10)
+            habilidades_input = st.text_area("Habilidades BNCC")
+            num_questoes = st.slider("Total de Questões", 1, 20, 5)
         
-        btn_gerar = st.form_submit_button("Gerar Prova com IA")
+        btn_gerar = st.form_submit_button("Gerar Questões para Revisão")
 
     if btn_gerar:
-        with st.spinner("A IA está elaborando as questões..."):
-            questoes = gerar_questoes_ia(habilidade, disciplina, num_q)
-            st.session_state['prova_atual'] = questoes
-            st.success("Prova gerada com sucesso!")
+        # Simulação de geração (AQUI ENTRARÁ A IA NO FUTURO)
+        lista_habilidades = [h.strip() for h in habilidades_input.split(",")]
+        novas_questoes = []
+        for i in range(num_questoes):
+            h_da_vez = lista_habilidades[i % len(lista_habilidades)]
+            novas_questoes.append({
+                "id": i+1,
+                "habilidade": h_da_vez,
+                "pergunta": f"Questão sobre {h_da_vez}: [IA gerará o texto aqui]",
+                "opcoes": ["A", "B", "C", "D", "E"],
+                "correta": "A",
+                "aprovada": False
+            })
+        st.session_state.prova_gerada = novas_questoes
+        st.session_state.dados_prova = {"prof": nome_prof, "materia": materia, "habilidades": habilidades_input}
 
-        for q in questoes:
-            st.write(f"**{q['id']}. {q['enunciado']}**")
-            for alt in q['alternativas']:
-                st.write(alt)
-        
-        st.info("O link para os alunos foi gerado: `nami-educa.streamlit.app/?prova=ativa` (Simulado)")
+    # Área de Revisão
+    if st.session_state.prova_gerada:
+        st.divider()
+        st.header("Revisão das Questões")
+        for i, q in enumerate(st.session_state.prova_gerada):
+            with st.container(border=True):
+                st.write(f"**Questão {q['id']}** (Habilidade: {q['habilidade']})")
+                st.text_area(f"Enunciado {q['id']}", value=q['pergunta'], key=f"txt_{i}")
+                
+                col_img, col_rev = st.columns([1, 2])
+                with col_img:
+                    st.file_uploader(f"Adicionar Imagem à Q{q['id']}", type=["jpg", "png"], key=f"img_{i}")
+                with col_rev:
+                    st.text_input(f"Solicitar modificação para Q{q['id']}", placeholder="Ex: Deixe o texto mais curto...", key=f"mod_{i}")
+                    st.checkbox("Questão OK", key=f"ok_{i}")
 
-# --- MÓDULO DO ALUNO: RESPONDER ---
-elif escolha == "✍️ Responder Prova (Aluno)":
-    st.title("Avaliação Diagnóstica Online")
-    
-    nome_aluno = st.text_input("Seu Nome Completo")
-    turma_aluno = st.text_input("Sua Turma")
-
-    if 'prova_atual' in st.session_state:
-        respostas_aluno = {}
-        for q in st.session_state['prova_atual']:
-            respostas_aluno[q['id']] = st.radio(f"{q['id']}. {q['enunciado']}", ["A", "B", "C", "D", "E"], key=f"q{q['id']}")
-
-        if st.button("Enviar Respostas"):
-            # Aqui salvaríamos em um Banco de Dados ou Google Sheets
-            st.balloons()
-            st.success("Respostas enviadas! Obrigado, " + nome_aluno)
-            # Armazenando temporariamente para o exemplo
-            if 'respostas_db' not in st.session_state: st.session_state['respostas_db'] = []
-            st.session_state['respostas_db'].append({"Nome": nome_aluno, "Turma": turma_aluno, **respostas_aluno})
+# --- ABA 2: ALUNO ---
+with aba2:
+    st.header("📝 Avaliação Online")
+    if not st.session_state.prova_gerada:
+        st.warning("Nenhuma prova foi liberada pelo professor ainda.")
     else:
-        st.warning("Nenhuma prova ativa no momento.")
+        with st.form("prova_aluno"):
+            st.info(f"Disciplina: {st.session_state.dados_prova['materia']}")
+            nome_aluno = st.text_input("Nome Completo do Aluno")
+            turma_aluno = st.text_input("Turma (Ex: 9º Ano A)")
+            
+            st.divider()
+            respostas_atuais = {}
+            for q in st.session_state.prova_gerada:
+                st.write(f"**{q['id']}.** {q['pergunta']}")
+                respostas_atuais[q['id']] = st.radio(f"Escolha a alternativa da Q{q['id']}", q['opcoes'], key=f"aluno_q{q['id']}", label_visibility="collapsed")
+                st.write("")
+            
+            if st.form_submit_button("Finalizar e Enviar Prova"):
+                if nome_aluno and turma_aluno:
+                    dados_aluno = {"Aluno": nome_aluno, "Turma": turma_aluno, **respostas_atuais}
+                    st.session_state.respostas_alunos.append(dados_aluno)
+                    st.success("Respostas enviadas com sucesso!")
+                    st.balloons()
+                else:
+                    st.error("Por favor, preencha seu nome e turma.")
 
-# --- MÓDULO DE TABULAÇÃO: GOVERNO ---
-elif escolha == "📊 Tabulação Oficial":
-    st.title("Relatórios e Tabulação")
-    
-    if 'respostas_db' in st.session_state:
-        df = pd.DataFrame(st.session_state['respostas_db'])
-        st.write("Dados Coletados em Tempo Real:")
+# --- ABA 3: TABULAÇÃO ---
+with aba3:
+    st.header("📊 Resultado Final")
+    if not st.session_state.respostas_alunos:
+        st.info("As respostas dos alunos aparecerão aqui conforme forem enviadas.")
+    else:
+        df = pd.DataFrame(st.session_state.respostas_alunos)
+        st.write("Dados Consolidados:")
         st.dataframe(df)
-
-        if st.button("Gerar Excel (Modelo do Governo)"):
-            # Aqui rodaria a lógica de formatação que criamos no app anterior
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False)
-            
-            st.download_button("Baixar Tabulação Oficial", output.getvalue(), "tabulacao_nami.xlsx")
-            
-        # --- ANÁLISE PEDAGÓGICA ---
-        st.subheader("Análise NAMI para o Professor")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.metric("Média da Turma", "7.5")
-        with col_b:
-            st.error("Questão Crítica: Questão 4 (80% de erro)")
-    else:
-        st.info("Aguardando respostas de alunos para gerar relatórios.")
+        
+        # Aqui geramos o Excel no modelo que você enviou antes
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False)
+        
+        st.download_button("📥 Baixar Tabulação Oficial (Governo)", output.getvalue(), f"Tabulacao_{st.session_state.dados_prova['materia']}.xlsx")
