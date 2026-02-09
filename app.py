@@ -3,21 +3,22 @@ import pandas as pd
 import io
 import datetime
 import uuid
+import json
 
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# =========================
+# =====================================================
 # CONFIGURAÇÃO DA PÁGINA
-# =========================
+# =====================================================
 st.set_page_config(
     page_title="Escola José Carlos Antunes",
     layout="wide"
 )
 
-# =========================
+# =====================================================
 # CONFIGURAÇÃO DA IA (SEGURA)
-# =========================
+# =====================================================
 try:
     API_KEY = st.secrets["GOOGLE_API_KEY"]
     genai.configure(api_key=API_KEY)
@@ -25,14 +26,13 @@ try:
     model = genai.GenerativeModel(
         model_name="models/gemini-1.5-flash"
     )
-
 except Exception as e:
     st.error(f"Erro ao configurar IA: {e}")
     st.stop()
 
-# =========================
+# =====================================================
 # MEMÓRIA DO APP
-# =========================
+# =====================================================
 if "provas_db" not in st.session_state:
     st.session_state.provas_db = {}
 
@@ -42,9 +42,9 @@ if "respostas_db" not in st.session_state:
 if "id_ativa" not in st.session_state:
     st.session_state.id_ativa = None
 
-# =========================
-# QUERY PARAMS (COMPATÍVEL)
-# =========================
+# =====================================================
+# QUERY PARAMS
+# =====================================================
 query_params = (
     st.query_params
     if hasattr(st, "query_params")
@@ -54,29 +54,42 @@ query_params = (
 view = query_params.get("view", "professor")
 id_url = query_params.get("prova", "")
 
-# =========================
-# FUNÇÃO DE GERAÇÃO DA IA
-# =========================
-def gerar_questoes_ia(habilidades, materia, num_q):
+# =====================================================
+# FUNÇÃO DE GERAÇÃO DAS QUESTÕES (IA)
+# =====================================================
+def gerar_questoes_ia(habilidade, materia, num_q):
+
     prompt = f"""
-Você é um gerador de provas escolares.
+Você é um professor experiente da rede pública.
 
-Crie {num_q} questões de múltipla escolha sobre a disciplina {materia}.
+Crie exatamente {num_q} questões de múltipla escolha
+para uma avaliação diagnóstica da disciplina {materia}.
 
-Habilidades avaliadas:
-{habilidades}
+Habilidade avaliada (texto digitado pelo professor):
+"{habilidade}"
 
-REGRAS OBRIGATÓRIAS:
-- NÃO use markdown
-- NÃO numere as questões
-- Retorne UMA questão por linha
-- Separe os campos usando o caractere |
+REGRAS:
+- Linguagem clara
+- Adequado ao nível da turma
+- Apenas UMA alternativa correta
+- Não use markdown
+- Não escreva texto fora do JSON
 
-FORMATO EXATO:
-Enunciado|Alternativa A|Alternativa B|Alternativa C|Alternativa D|Alternativa E|LetraCorreta
+RETORNE APENAS UM JSON VÁLIDO neste formato:
 
-EXEMPLO:
-Quanto é 2+2?|1|2|3|4|5|D
+[
+  {{
+    "enunciado": "texto da questão",
+    "alternativas": {{
+      "A": "texto",
+      "B": "texto",
+      "C": "texto",
+      "D": "texto",
+      "E": "texto"
+    }},
+    "correta": "A"
+  }}
+]
 """
 
     safety_settings = {
@@ -87,45 +100,36 @@ Quanto é 2+2?|1|2|3|4|5|D
     }
 
     try:
-        response = model.generate_content(
-            prompt,
-            safety_settings=safety_settings
-        )
+        response = model.generate_content(prompt, safety_settings=safety_settings)
+        raw = response.text.strip()
+        st.session_state["debug_ia"] = raw
 
-        texto = response.text.strip()
-        st.session_state["debug_ia"] = texto
+        dados = json.loads(raw)
 
-        linhas = [l.strip() for l in texto.split("\n") if len(l.strip()) > 10]
         questoes = []
-
-        for linha in linhas:
-            partes = linha.split("|")
-
-            if len(partes) >= 7:
-                questoes.append({
-                    "id": len(questoes) + 1,
-                    "habilidade": habilidades,
-                    "pergunta": partes[0],
-                    "A": partes[1],
-                    "B": partes[2],
-                    "C": partes[3],
-                    "D": partes[4],
-                    "E": partes[5],
-                    "correta": partes[6].strip().upper()[0]
-                })
-
-        if len(questoes) < num_q:
-            st.warning("A IA retornou menos questões do que o solicitado.")
+        for i, q in enumerate(dados):
+            questoes.append({
+                "id": i + 1,
+                "habilidade": habilidade,
+                "pergunta": q["enunciado"],
+                "A": q["alternativas"]["A"],
+                "B": q["alternativas"]["B"],
+                "C": q["alternativas"]["C"],
+                "D": q["alternativas"]["D"],
+                "E": q["alternativas"]["E"],
+                "correta": q["correta"]
+            })
 
         return questoes
 
     except Exception as e:
-        st.error(f"Erro na geração da IA: {e}")
+        st.error("❌ A IA não retornou dados válidos.")
+        st.exception(e)
         return []
 
-# =========================
+# =====================================================
 # INTERFACE DO ALUNO
-# =========================
+# =====================================================
 if view == "aluno":
 
     if id_url not in st.session_state.provas_db:
@@ -143,17 +147,9 @@ if view == "aluno":
             st.markdown("---")
             st.write(f"**{q['id']}. {q['pergunta']}**")
 
-            alternativas = {
-                "A": q["A"],
-                "B": q["B"],
-                "C": q["C"],
-                "D": q["D"],
-                "E": q["E"],
-            }
-
             escolha = st.radio(
                 "Selecione uma alternativa:",
-                list(alternativas.keys()),
+                ["A", "B", "C", "D", "E"],
                 key=f"aluno_{id_url}_{q['id']}",
                 label_visibility="collapsed"
             )
@@ -165,6 +161,8 @@ if view == "aluno":
         if enviado:
             if not nome.strip():
                 st.error("Informe seu nome.")
+            elif len(respostas) < len(prova["questoes"]):
+                st.error("Responda todas as questões.")
             else:
                 st.session_state.respostas_db.append({
                     "ID_Prova": id_url,
@@ -173,15 +171,17 @@ if view == "aluno":
                 })
                 st.success("Prova enviada com sucesso!")
 
-# =========================
+# =====================================================
 # INTERFACE DO PROFESSOR
-# =========================
+# =====================================================
 else:
     st.title("🏫 Escola José Carlos Antunes")
 
-    aba1, aba2 = st.tabs(["📝 Criar Prova", "📊 Tabulação"])
+    aba1, aba2 = st.tabs(["📝 Criar Prova", "📊 Tabulação Oficial"])
 
-    # -------- CRIAÇÃO DA PROVA --------
+    # =================================================
+    # CRIAÇÃO DA PROVA
+    # =================================================
     with aba1:
         with st.container(border=True):
             c1, c2 = st.columns(2)
@@ -189,39 +189,40 @@ else:
             prof = c1.text_input("Professor")
             materia = c1.text_input("Disciplina")
             turma = c2.text_input("Turma")
-            habilidades = c2.text_area("Habilidades (BNCC)")
+            habilidade = c2.text_area("Habilidade avaliada (texto livre)")
             num_q = st.slider("Número de questões", 1, 10, 5)
 
             if st.button("✨ GERAR PROVA"):
-                with st.spinner("Gerando questões..."):
-                    questoes = gerar_questoes_ia(habilidades, materia, num_q)
+                questoes = gerar_questoes_ia(habilidade, materia, num_q)
 
-                    if not questoes:
-                        questoes = [{
-                            "id": i + 1,
-                            "habilidade": habilidades,
-                            "pergunta": "Digite o enunciado",
-                            "A": "", "B": "", "C": "", "D": "", "E": "",
-                            "correta": "A"
-                        } for i in range(num_q)]
+                if not questoes:
+                    questoes = [{
+                        "id": i + 1,
+                        "habilidade": habilidade,
+                        "pergunta": "Digite o enunciado",
+                        "A": "", "B": "", "C": "", "D": "", "E": "",
+                        "correta": "A"
+                    } for i in range(num_q)]
 
-                    prova_id = str(uuid.uuid4())
+                prova_id = str(uuid.uuid4())
 
-                    st.session_state.provas_db[prova_id] = {
-                        "prof": prof,
-                        "materia": materia,
-                        "turma": turma,
-                        "questoes": questoes
-                    }
+                st.session_state.provas_db[prova_id] = {
+                    "prof": prof,
+                    "materia": materia,
+                    "turma": turma,
+                    "questoes": questoes
+                }
 
-                    st.session_state.id_ativa = prova_id
-                    st.rerun()
+                st.session_state.id_ativa = prova_id
+                st.rerun()
 
         if "debug_ia" in st.session_state:
             with st.expander("🛠 Texto bruto da IA"):
                 st.text(st.session_state["debug_ia"])
 
-        # -------- EDIÇÃO DA PROVA --------
+        # =================================================
+        # EDIÇÃO DA PROVA
+        # =================================================
         if st.session_state.id_ativa:
             pid = st.session_state.id_ativa
             prova = st.session_state.provas_db[pid]
@@ -254,7 +255,9 @@ else:
                         key=f"{pid}_g_{i}"
                     )
 
-    # -------- TABULAÇÃO --------
+    # =================================================
+    # TABULAÇÃO OFICIAL (MESCLADA)
+    # =================================================
     with aba2:
         sel = st.selectbox(
             "Selecione a prova",
@@ -272,13 +275,54 @@ else:
                 st.warning("Ainda não há respostas.")
                 st.stop()
 
-            gabarito = [q["correta"] for q in prova["questoes"]]
-            n = len(gabarito)
+            questoes = prova["questoes"]
+            n = len(questoes)
 
-            linhas = [
-                ["Aluno"] + list(range(1, n + 1)) + ["Acertos"]
-            ]
+            gabarito = [q["correta"] for q in questoes]
+            habilidades_q = [q["habilidade"] for q in questoes]
 
+            linhas = []
+
+            # LINHA I – Cabeçalho institucional
+            linhas.append(
+                ["I – Avaliação Diagnóstica",
+                 f"{prova['materia']} – Prof. {prova['prof']} – Turma {prova['turma']}"]
+                + [""] * (n - 1)
+                + ["Data"]
+            )
+
+            linhas.append(
+                [""] * (n + 1) + [datetime.date.today().strftime("%d/%m/%Y")]
+            )
+
+            # LINHA II – Habilidades por questão
+            linhas.append(
+                ["II – Habilidade Avaliada"]
+                + habilidades_q
+                + [""]
+            )
+
+            # LINHA III – Gabarito
+            linhas.append(
+                ["III – Alternativa Correta"]
+                + gabarito
+                + [len(respostas)]
+            )
+
+            # LINHA IV – Conhecimento Prévio
+            linhas.append(
+                ["IV – Conhecimento Prévio"]
+                + [""] * (n + 1)
+            )
+
+            # LINHA V – Cabeçalho alunos
+            linhas.append(
+                ["V – Nome dos(as) estudantes"]
+                + list(range(1, n + 1))
+                + ["Acertos"]
+            )
+
+            # LINHAS DOS ALUNOS
             for r in respostas:
                 acertos = sum(
                     1 for i in range(n)
@@ -286,13 +330,12 @@ else:
                 )
 
                 linhas.append(
-                    [r["Nome"]] +
-                    [r.get(f"q_{i+1}", "-") for i in range(n)] +
-                    [acertos]
+                    [r["Nome"]]
+                    + [r.get(f"q_{i+1}", "-") for i in range(n)]
+                    + [acertos]
                 )
 
             df = pd.DataFrame(linhas)
-
             st.dataframe(df)
 
             buffer = io.BytesIO()
@@ -300,7 +343,7 @@ else:
                 df.to_excel(writer, index=False, header=False)
 
             st.download_button(
-                "📥 Baixar Excel",
+                "📥 Baixar Excel Oficial",
                 buffer.getvalue(),
                 file_name=f"Tabulacao_{sel}.xlsx"
             )
