@@ -13,12 +13,12 @@ API_KEY = "AIzaSyCtARJYX6bWZqXtecUZH4EYFzj-KbREctw"
 
 try:
     genai.configure(api_key=API_KEY)
-    # MUDANÇA AQUI: Usando o modelo 'gemini-pro' que funciona na v1beta
+    # Usando gemini-pro com configurações de segurança permissivas
     model = genai.GenerativeModel('gemini-pro')
 except Exception as e:
     st.error(f"Erro de configuração: {e}")
 
-# --- MEMÓRIA (SESSION STATE) ---
+# --- MEMÓRIA ---
 if 'provas_db' not in st.session_state: st.session_state.provas_db = {}
 if 'respostas_db' not in st.session_state: st.session_state.respostas_db = []
 if 'id_ativa' not in st.session_state: st.session_state.id_ativa = None
@@ -28,52 +28,72 @@ query_params = st.query_params
 view = query_params.get("view", "professor")
 id_url = query_params.get("prova", "")
 
-# --- FUNÇÃO GERADORA ---
+# --- FUNÇÃO GERADORA ROBUSTA ---
 def gerar_questoes_ia(habilidades, materia, num_q):
     prompt = f"""
-    Crie {num_q} questões de múltipla escolha sobre {materia}.
+    Você é um gerador de provas. Crie {num_q} questões de múltipla escolha sobre {materia}.
     Habilidades: {habilidades}
     
-    REGRA DE SAÍDA (IMPORTANTE):
-    Escreva cada questão em uma única linha separada por barras (|).
-    Não use negrito. Não pule linhas entre as questões.
+    REGRA CRÍTICA DE FORMATAÇÃO:
+    Retorne APENAS os dados separados por pipe (|).
+    NÃO USE MARKDOWN. NÃO USE NEGRITO. NÃO NUMERE AS LINHAS.
     
-    Formato:
-    Enunciado|Alternativa A|Alternativa B|Alternativa C|Alternativa D|Alternativa E|LetraCorreta
+    Padrão obrigatório:
+    Enunciado da Questão|Alternativa A|Alternativa B|Alternativa C|Alternativa D|Alternativa E|LetraCorreta
     
     Exemplo:
-    Quanto é 2+2?|1|2|3|4|5|D
+    Quanto é 1+1?|1|2|3|4|5|B
     """
     try:
-        response = model.generate_content(prompt)
-        # Debug para você ver se a IA respondeu
+        # Configuração para a IA ser mais direta e não bloquear conteúdo
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        
+        response = model.generate_content(prompt, safety_settings=safety_settings)
+        
+        # Guardar o texto cru para debug
         st.session_state['debug_ia'] = response.text
         
-        linhas = [l.strip() for l in response.text.split('\n') if '|' in l]
+        # Limpeza e processamento
+        linhas = [l.strip() for l in response.text.split('\n') if len(l) > 5]
         questoes = []
         
         for linha in linhas:
+            # Remove marcadores de lista se a IA colocar (ex: "1. Questão...")
+            if linha[0].isdigit() and linha[1] in ['.', ')']:
+                linha = linha[2:].strip()
+            
             partes = linha.split('|')
+            
+            # CENÁRIO 1: A IA obedeceu e mandou tudo separado
             if len(partes) >= 7:
                 questoes.append({
                     "id": len(questoes) + 1,
                     "habilidade": habilidades,
                     "pergunta": partes[0],
                     "A": partes[1], "B": partes[2], "C": partes[3], "D": partes[4], "E": partes[5],
-                    "correta": partes[6].strip().upper()[0] if len(partes) > 6 else "A"
+                    "correta": partes[6].strip().upper()[0] if len(partes[6].strip()) > 0 else "A"
                 })
-        
-        # Se a IA respondeu mas não formatou certo, usamos o texto cru
-        if not questoes and response.text:
-             return [{
-                "id": 1, "habilidade": habilidades, "pergunta": "A IA gerou o texto mas fora do formato. Copie do Debug abaixo.", 
-                "A": "", "B": "", "C": "", "D": "", "E": "", "correta": "A"
-            }]
+            
+            # CENÁRIO 2: A IA mandou o texto mas esqueceu as barras (Fallback)
+            # Jogamos tudo no Enunciado para você não perder o texto
+            else:
+                questoes.append({
+                    "id": len(questoes) + 1,
+                    "habilidade": habilidades,
+                    "pergunta": linha + " [IA não separou as alternativas, edite abaixo]",
+                    "A": "Edite aqui", "B": "Edite aqui", "C": "Edite aqui", "D": "Edite aqui", "E": "Edite aqui",
+                    "correta": "A"
+                })
 
         return questoes
 
     except Exception as e:
-        st.warning(f"Erro ao conectar com Gemini Pro ({e}). Gerando manual.")
+        st.error(f"Erro técnico na IA: {e}")
         return []
 
 # --- INTERFACE ALUNO ---
@@ -88,14 +108,16 @@ if view == "aluno":
             for q in p['questoes']:
                 st.write("---")
                 st.write(f"**{q['id']}.** {q['pergunta']}")
-                resps[f"q_{q['id']}"] = st.radio(f"R{q['id']}", [f"A) {q['A']}", f"B) {q['B']}", f"C) {q['C']}", f"D) {q['D']}", f"E) {q['E']}"], key=f"r_{q['id']}", label_visibility="collapsed")
+                resps[f"q_{q['id']}"] = st.radio(f"Opções {q['id']}", 
+                    [f"A) {q['A']}", f"B) {q['B']}", f"C) {q['C']}", f"D) {q['D']}", f"E) {q['E']}"], 
+                    key=f"r_{q['id']}", label_visibility="collapsed")
             
             if st.form_submit_button("Enviar"):
                 if nome:
                     st.session_state.respostas_db.append({"ID_Prova": id_url, "Nome": nome, **{k: v[0] for k, v in resps.items()}})
-                    st.success("Sucesso!")
+                    st.success("Enviado com sucesso!")
                 else:
-                    st.error("Nome obrigatório.")
+                    st.error("Preencha seu nome.")
     else:
         st.error("Prova não encontrada.")
 
@@ -114,20 +136,22 @@ else:
             habs = c2.text_area("Habilidades BNCC")
             num = st.slider("Questões", 1, 10, 5)
             
-            if st.button("✨ GERAR (Gemini Pro)"):
-                with st.spinner("Gerando..."):
+            if st.button("✨ GERAR PROVA"):
+                with st.spinner("Gerando questões..."):
                     qs = gerar_questoes_ia(habs, materia, num)
+                    
+                    # Se vier vazio mesmo com o código novo, cria placeholders
                     if not qs:
-                        # Fallback se falhar
-                        qs = [{"id": i+1, "habilidade": habs, "pergunta": "", "A":"", "B":"", "C":"", "D":"", "E":"", "correta":"A"} for i in range(num)]
+                        qs = [{"id": i+1, "habilidade": habs, "pergunta": "A IA não retornou texto. Digite aqui.", "A":"","B":"","C":"","D":"","E":"","correta":"A"} for i in range(num)]
                     
                     id_p = f"{materia}_{turma}_{datetime.datetime.now().strftime('%H%M%S')}"
                     st.session_state.provas_db[id_p] = {"prof": prof, "materia": materia, "turma": turma, "questoes": qs}
                     st.session_state.id_ativa = id_p
                     st.rerun()
 
+        # Debugger: Se algo der errado, você vê o texto original aqui
         if 'debug_ia' in st.session_state:
-            with st.expander("Ver resposta bruta da IA (Debug)"):
+            with st.expander("🛠️ Ver Texto Original da IA (Debug)"):
                 st.text(st.session_state['debug_ia'])
 
         if st.session_state.id_ativa:
@@ -136,7 +160,7 @@ else:
             st.info(f"Link Aluno: `https://diagnostica-antunes-2026.streamlit.app/?view=aluno&prova={id_at}`")
             
             for i, q in enumerate(p['questoes']):
-                with st.expander(f"Q{q['id']}", expanded=True):
+                with st.expander(f"Questão {q['id']}", expanded=True):
                     q['pergunta'] = st.text_area("Enunciado", q['pergunta'], key=f"p_{i}")
                     cols = st.columns(5)
                     q['A'] = cols[0].text_input("A", q['A'], key=f"a_{i}")
@@ -144,6 +168,7 @@ else:
                     q['C'] = cols[2].text_input("C", q['C'], key=f"c_{i}")
                     q['D'] = cols[3].text_input("D", q['D'], key=f"d_{i}")
                     q['E'] = cols[4].text_input("E", q['E'], key=f"e_{i}")
+                    
                     idx = ["A","B","C","D","E"].index(q['correta']) if q['correta'] in ["A","B","C","D","E"] else 0
                     q['correta'] = st.selectbox("Gabarito", ["A","B","C","D","E"], index=idx, key=f"g_{i}")
 
@@ -155,6 +180,7 @@ else:
             if rs:
                 g = [q['correta'] for q in p_d['questoes']]
                 n = len(g)
+                # Cabeçalho Oficial
                 h = [
                     [" I - Avaliação Diagnóstica", p_d['materia']] + [""]*(n-1) + ["Data"],
                     [""]*(n+1) + [datetime.date.today().strftime('%d/%m/%Y')],
@@ -172,4 +198,6 @@ else:
                 out = io.BytesIO()
                 with pd.ExcelWriter(out, engine='openpyxl') as writer:
                     df.to_excel(writer, index=False, header=False)
-                st.download_button("📥 Excel Oficial", out.getvalue(), f"Tabulacao_{sel}.xlsx")
+                st.download_button("📥 Baixar Excel", out.getvalue(), f"Tabulacao_{sel}.xlsx")
+            else:
+                st.warning("Sem respostas ainda.")
