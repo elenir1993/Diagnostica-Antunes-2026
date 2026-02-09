@@ -19,7 +19,7 @@ st.set_page_config(
 # CONFIGURAÇÃO DA IA (SEGURA)
 # =========================
 try:
-    API_KEY = st.secrets["AIzaSyCtARJYX6bWZqXtecUZH4EYFzj-KbREctw"]
+    API_KEY = st.secrets["GOOGLE_API_KEY"]
     genai.configure(api_key=API_KEY)
 
     model = genai.GenerativeModel(
