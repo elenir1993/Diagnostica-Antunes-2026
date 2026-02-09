@@ -19,7 +19,7 @@ st.set_page_config(
 # =====================================================
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-    model = genai.GenerativeModel("models/gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-1.0-pro")
 except Exception as e:
     st.error(f"Erro ao configurar IA: {e}")
     st.stop()
